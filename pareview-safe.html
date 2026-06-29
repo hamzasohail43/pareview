@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pareview — instant AI code review</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+  :root{
+    --base:#0D1117;
+    --panel:#1C2128;
+    --panel-2:#161B22;
+    --text:#E6E1D8;
+    --text-dim: rgba(230,225,216,0.5);
+    --coral:#FF6B47;
+    --sage:#7FB069;
+    --line: rgba(230,225,216,0.08);
+    --amber:#E8B339;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--base);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    min-height:100vh;
+  }
+
+  .wrap{
+    max-width:1240px;
+    margin:0 auto;
+    padding:28px 24px 60px;
+  }
+
+  header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:28px;
+  }
+  .brand{
+    font-family:'JetBrains Mono', monospace;
+    font-size:15px;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .brand .dot{
+    width:8px; height:8px;
+    border-radius:50%;
+    background:var(--coral);
+    display:inline-block;
+  }
+  .tagline{
+    font-size:12px;
+    color:var(--text-dim);
+    font-family:'JetBrains Mono', monospace;
+  }
+
+  h1.hero{
+    font-size:clamp(26px, 3.4vw, 36px);
+    font-weight:600;
+    line-height:1.2;
+    margin:0 0 8px;
+    max-width:640px;
+  }
+  h1.hero .accent{ color:var(--coral); }
+  p.sub{
+    color:var(--text-dim);
+    font-size:15px;
+    margin-bottom:28px;
+    max-width:560px;
+  }
+
+  /* Language + action bar */
+  .toolbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:0;
+    padding:0 4px;
+  }
+  .lang-tabs{
+    display:flex;
+    gap:4px;
+  }
+  .lang-tab{
+    font-family:'JetBrains Mono', monospace;
+    font-size:12px;
+    padding:7px 14px;
+    background:transparent;
+    border:none;
+    color:var(--text-dim);
+    cursor:pointer;
+    border-radius:4px 4px 0 0;
+  }
+  .lang-tab.active{
+    color:var(--text);
+    background:var(--panel);
+  }
+
+  .review-btn{
+    font-family:'JetBrains Mono', monospace;
+    font-size:13px;
+    font-weight:600;
+    background:var(--coral);
+    color:var(--base);
+    border:none;
+    padding:10px 22px;
+    border-radius:5px;
+    cursor:pointer;
+    transition:opacity 0.2s, transform 0.1s;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .review-btn:hover:not(:disabled){ opacity:0.88; }
+  .review-btn:active:not(:disabled){ transform:scale(0.98); }
+  .review-btn:disabled{ background:rgba(230,225,216,0.15); color:var(--text-dim); cursor:not-allowed; }
+
+  /* Main grid: editor + review panel */
+  .main-grid{
+    display:grid;
+    grid-template-columns:1fr 360px;
+    gap:0;
+    border:1px solid var(--line);
+    border-radius:0 8px 8px 8px;
+    overflow:hidden;
+  }
+  @media (max-width:900px){
+    .main-grid{ grid-template-columns:1fr; }
+  }
+
+  /* Editor pane */
+  .editor-pane{
+    background:var(--panel);
+    position:relative;
+    border-right:1px solid var(--line);
+  }
+  .editor-inner{
+    display:flex;
+    font-family:'JetBrains Mono', monospace;
+    font-size:13.5px;
+    line-height:1.65;
+  }
+  .gutter{
+    padding:18px 0 18px 16px;
+    text-align:right;
+    color:rgba(230,225,216,0.25);
+    user-select:none;
+    min-width:42px;
+  }
+  .gutter-line{
+    height:22.3px;
+    position:relative;
+    padding-right:12px;
+  }
+  .gutter-marker{
+    position:absolute;
+    right:-6px;
+    top:2px;
+    width:14px; height:14px;
+    border-radius:50%;
+    font-size:9px;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    color:var(--base);
+    font-weight:700;
+  }
+  .gutter-marker.show{ display:flex; }
+  .gutter-marker.severity-issue{ background:var(--coral); }
+  .gutter-marker.severity-warn{ background:var(--amber); }
+  .gutter-marker.severity-good{ background:var(--sage); }
+
+  textarea#code-input{
+    flex:1;
+    background:transparent;
+    border:none;
+    outline:none;
+    color:var(--text);
+    font-family:'JetBrains Mono', monospace;
+    font-size:13.5px;
+    line-height:1.65;
+    padding:18px 18px 18px 8px;
+    resize:none;
+    min-height:420px;
+    white-space:pre;
+  }
+  textarea#code-input::placeholder{ color:rgba(230,225,216,0.3); }
+
+  .highlight-line{
+    position:absolute;
+    left:0; right:0;
+    background:rgba(255,107,71,0.08);
+    border-left:2px solid var(--coral);
+    pointer-events:none;
+    display:none;
+  }
+
+  /* Review pane */
+  .review-pane{
+    background:var(--panel-2);
+    display:flex;
+    flex-direction:column;
+  }
+  .review-header{
+    padding:16px 18px;
+    border-bottom:1px solid var(--line);
+    font-family:'JetBrains Mono', monospace;
+    font-size:11.5px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .review-count{
+    background:var(--coral);
+    color:var(--base);
+    border-radius:10px;
+    padding:1px 8px;
+    font-size:11px;
+  }
+  .review-count.zero{ background:var(--sage); }
+
+  .review-empty{
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:var(--text-dim);
+    font-size:13px;
+    text-align:center;
+    padding:40px 24px;
+    line-height:1.6;
+  }
+
+  .review-list{
+    flex:1;
+    overflow-y:auto;
+    padding:10px;
+  }
+  .review-item{
+    background:var(--panel);
+    border-radius:6px;
+    padding:13px 14px;
+    margin-bottom:8px;
+    cursor:pointer;
+    border-left:3px solid var(--line);
+    transition:border-color 0.15s, background 0.15s;
+  }
+  .review-item:hover{ background:rgba(230,225,216,0.04); }
+  .review-item.severity-issue{ border-left-color:var(--coral); }
+  .review-item.severity-warn{ border-left-color:var(--amber); }
+  .review-item.severity-good{ border-left-color:var(--sage); }
+
+  .review-item-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-bottom:5px;
+  }
+  .review-line-tag{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10.5px;
+    color:var(--text-dim);
+  }
+  .review-severity-label{
+    font-family:'JetBrains Mono', monospace;
+    font-size:9.5px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    font-weight:600;
+  }
+  .severity-issue .review-severity-label{ color:var(--coral); }
+  .severity-warn .review-severity-label{ color:var(--amber); }
+  .severity-good .review-severity-label{ color:var(--sage); }
+
+  .review-item-title{
+    font-size:13px;
+    font-weight:600;
+    margin-bottom:4px;
+  }
+  .review-item-desc{
+    font-size:12px;
+    color:var(--text-dim);
+    line-height:1.5;
+  }
+
+  /* Learn-more teaching layer */
+  .learn-toggle{
+    margin-top:10px;
+    font-family:'JetBrains Mono', monospace;
+    font-size:10.5px;
+    letter-spacing:0.04em;
+    color:var(--sage);
+    background:transparent;
+    border:1px solid rgba(127,176,105,0.35);
+    border-radius:4px;
+    padding:5px 10px;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    transition:all 0.15s;
+  }
+  .learn-toggle:hover{ background:rgba(127,176,105,0.1); }
+  .learn-toggle .chev{
+    display:inline-block;
+    transition:transform 0.2s;
+    font-size:9px;
+  }
+  .learn-toggle.open .chev{ transform:rotate(90deg); }
+
+  .lesson-panel{
+    display:none;
+    margin-top:12px;
+    padding-top:12px;
+    border-top:1px dashed var(--line);
+  }
+  .lesson-panel.open{ display:block; }
+
+  .lesson-eyebrow{
+    font-family:'JetBrains Mono', monospace;
+    font-size:9.5px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin-bottom:6px;
+  }
+  .lesson-body{
+    font-size:12px;
+    line-height:1.6;
+    color:var(--text);
+    margin-bottom:12px;
+  }
+
+  .try-it-box{
+    background:var(--base);
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+  }
+  .try-it-tabs{
+    display:flex;
+    border-bottom:1px solid var(--line);
+  }
+  .try-it-tab{
+    flex:1;
+    text-align:center;
+    font-family:'JetBrains Mono', monospace;
+    font-size:9.5px;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+    padding:7px 0;
+    color:var(--text-dim);
+  }
+  .try-it-tab.before{ color:var(--coral); border-right:1px solid var(--line); }
+  .try-it-tab.after{ color:var(--sage); }
+  .try-it-code{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11.5px;
+    line-height:1.6;
+    padding:10px 12px;
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+  .try-it-code.before-code{ color:rgba(255,107,71,0.85); border-bottom:1px dashed var(--line); }
+  .try-it-code.after-code{ color:rgba(127,176,105,0.9); }
+
+  .thinking-state{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    padding:40px 20px;
+  }
+  .scan-bar{
+    width:140px;
+    height:3px;
+    background:rgba(230,225,216,0.1);
+    border-radius:2px;
+    overflow:hidden;
+    position:relative;
+  }
+  .scan-bar-fill{
+    position:absolute;
+    left:0; top:0; bottom:0;
+    width:40%;
+    background:var(--coral);
+    border-radius:2px;
+    animation:scan 1.1s ease-in-out infinite;
+  }
+  @keyframes scan{
+    0%{ left:-40%; }
+    100%{ left:100%; }
+  }
+  .thinking-label{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11.5px;
+    color:var(--text-dim);
+  }
+
+  footer{
+    margin-top:24px;
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color:var(--text-dim);
+    display:flex;
+    justify-content:space-between;
+  }
+
+  .key-bar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:10px 14px;
+    margin-bottom:20px;
+  }
+  .key-bar label{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11.5px;
+    color:var(--text-dim);
+    white-space:nowrap;
+  }
+  .key-bar input{
+    flex:1;
+    background:var(--base);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:7px 10px;
+    color:var(--text);
+    font-family:'JetBrains Mono', monospace;
+    font-size:12.5px;
+    outline:none;
+  }
+  .key-bar input:focus{ border-color:var(--coral); }
+  .key-bar .key-note{
+    font-size:11px;
+    color:var(--text-dim);
+    white-space:nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <div class="brand"><span class="dot"></span>Pareview</div>
+    <div class="tagline">// instant ai code review, no IDE required</div>
+  </header>
+
+  <h1 class="hero">Paste your code. Get the review a <span class="accent">senior engineer</span> would give you.</h1>
+  <p class="sub">Not a full IDE replacement — one sharp, focused pass. Drop in a function or file and get line-level feedback on bugs, risk, and style in seconds — plus a short lesson on the "why," so the next time you write it right the first time.</p>
+
+  <div class="key-bar">
+    <label for="api-key-input">Qwen API key:</label>
+    <input type="password" id="api-key-input" placeholder="Paste your key here — stored only in this browser, never uploaded">
+    <span class="key-note" id="key-status">not set</span>
+  </div>
+
+  <div class="toolbar">
+    <div class="lang-tabs">
+      <button class="lang-tab active" data-lang="JavaScript">JavaScript</button>
+      <button class="lang-tab" data-lang="Python">Python</button>
+      <button class="lang-tab" data-lang="HTML/CSS">HTML/CSS</button>
+    </div>
+    <button class="review-btn" id="review-btn">▸ Run review</button>
+  </div>
+
+  <div class="main-grid">
+    <div class="editor-pane">
+      <div class="editor-inner">
+        <div class="gutter" id="gutter"></div>
+        <textarea id="code-input" placeholder="// paste a function or file here..." spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="review-pane">
+      <div class="review-header">
+        <span>Review</span>
+        <span class="review-count zero" id="review-count">0</span>
+      </div>
+      <div class="review-empty" id="review-empty">Paste some code and click "Run review" to see line-by-line feedback here.</div>
+      <div class="thinking-state" id="thinking-state" style="display:none;">
+        <div class="scan-bar"><div class="scan-bar-fill"></div></div>
+        <div class="thinking-label">scanning for issues…</div>
+      </div>
+      <div class="review-list" id="review-list" style="display:none;"></div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Pareview — Autopilot Agent track demo</span>
+    <span>Qwen Cloud Hackathon 2026</span>
+  </footer>
+
+</div>
+
+<script>
+  // ===========================================================================
+  // PAREVIEW — demo logic.
+  //
+  // Right now this runs on a small set of MOCK pattern checks (see
+  // MOCK_RULES below) so the whole flow works with zero API key.
+  //
+  // To make it real: replace `runReview()`'s body with a call to Qwen Cloud's
+  // chat completions endpoint, asking it to return structured JSON findings.
+  // The shape MOCK_RULES produces (line, severity, title, description) is
+  // exactly what you'd want the model to return — see the commented block
+  // inside runReview() for the real API call shape.
+  // ===========================================================================
+
+  const codeInput = document.getElementById('code-input');
+  const gutter = document.getElementById('gutter');
+  const reviewBtn = document.getElementById('review-btn');
+  const reviewEmpty = document.getElementById('review-empty');
+  const thinkingState = document.getElementById('thinking-state');
+  const reviewList = document.getElementById('review-list');
+  const reviewCount = document.getElementById('review-count');
+  const langTabs = document.querySelectorAll('.lang-tab');
+  const apiKeyInput = document.getElementById('api-key-input');
+  const keyStatus = document.getElementById('key-status');
+
+  // Load any previously saved key from this browser only (never uploaded,
+  // never part of the file itself).
+  const savedKey = localStorage.getItem('pareview_qwen_key');
+  if(savedKey){
+    apiKeyInput.value = savedKey;
+    keyStatus.textContent = 'saved in this browser';
+  }
+  apiKeyInput.addEventListener('input', () => {
+    if(apiKeyInput.value.trim()){
+      localStorage.setItem('pareview_qwen_key', apiKeyInput.value.trim());
+      keyStatus.textContent = 'saved in this browser';
+    } else {
+      localStorage.removeItem('pareview_qwen_key');
+      keyStatus.textContent = 'not set';
+    }
+  });
+
+  const SAMPLE_CODE = `function getUser(id) {
+  const user = users.find(u => u.id == id);
+  console.log("fetched user:", user);
+  return user.name;
+}
+
+function calculateDiscount(price, pct) {
+  return price - (price * pct);
+}
+
+async function loadData() {
+  const res = fetch('/api/data');
+  const json = res.json();
+  return json;
+}`;
+
+  codeInput.value = SAMPLE_CODE;
+
+  function rebuildGutter(){
+    const lines = codeInput.value.split('\n');
+    gutter.innerHTML = '';
+    lines.forEach((_, i) => {
+      const div = document.createElement('div');
+      div.className = 'gutter-line';
+      div.textContent = i + 1;
+      const marker = document.createElement('span');
+      marker.className = 'gutter-marker';
+      marker.id = `marker-${i + 1}`;
+      div.appendChild(marker);
+      gutter.appendChild(div);
+    });
+  }
+  rebuildGutter();
+  codeInput.addEventListener('input', rebuildGutter);
+  codeInput.addEventListener('scroll', () => { gutter.scrollTop = codeInput.scrollTop; });
+
+  langTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      langTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+    });
+  });
+
+  // ---- Mock rule-based reviewer ---------------------------------------------
+  // Looks for a few common smell patterns just so the demo has real,
+  // line-accurate findings on the sample code without needing an API key.
+  const MOCK_RULES = [
+    {
+      test: (line) => /==(?!=)/.test(line) && !/===/.test(line),
+      severity: 'issue',
+      title: 'Loose equality (==)',
+      description: 'Using == instead of === can cause unexpected type coercion bugs. Prefer strict equality.',
+      lesson: "JavaScript's == operator converts mismatched types before comparing — so \"5\" == 5 is true, and even an empty string == 0 is true. That hidden conversion is rarely what you actually want, and it's a common source of bugs that only show up with certain input types. === skips the conversion and only matches when both type and value agree, which is almost always the comparison you actually meant to write.",
+      before: 'if (user.id == id) {\n  // ...\n}',
+      after: 'if (user.id === id) {\n  // ...\n}'
+    },
+    {
+      test: (line) => /console\.log/.test(line),
+      severity: 'warn',
+      title: 'Leftover console.log',
+      description: 'Debug logging left in — remove before shipping, or replace with a proper logger.',
+      lesson: 'console.log statements are great while you\'re debugging, but left in shipped code they clutter the browser console, can leak internal data structures to anyone with devtools open, and add tiny but real overhead at scale. A proper logger (or just deleting the line once you\'re done) keeps production output clean and intentional.',
+      before: 'console.log("fetched user:", user);\nreturn user.name;',
+      after: 'return user.name;'
+    },
+    {
+      test: (line) => /fetch\(/.test(line) && !/await/.test(line),
+      severity: 'issue',
+      title: 'Missing await on fetch',
+      description: 'fetch() returns a Promise — without await, res is a Promise object, not the response.',
+      lesson: 'fetch() is asynchronous — it returns a Promise immediately, before the network request actually finishes. If you don\'t await it, "res" is the Promise wrapper itself, not the response — so trying to read res.json() right after will either fail or behave unpredictably. await pauses the function until the real response arrives, so you\'re working with actual data.',
+      before: 'const res = fetch(\'/api/data\');\nconst json = res.json();',
+      after: 'const res = await fetch(\'/api/data\');\nconst json = await res.json();'
+    },
+    {
+      test: (line) => /\.json\(\)/.test(line) && !/await/.test(line),
+      severity: 'issue',
+      title: 'Missing await on .json()',
+      description: '.json() is also async — calling it without await will return a pending Promise, not parsed data.',
+      lesson: 'Just like fetch() itself, .json() also returns a Promise — parsing the response body takes time too. Skipping await here means the function returns before the data is actually ready, so whoever calls this function gets a Promise instead of the object they expected.',
+      before: 'const json = res.json();\nreturn json;',
+      after: 'const json = await res.json();\nreturn json;'
+    },
+    {
+      test: (line) => /function\s+\w+\([^)]*\)\s*{\s*$/.test(line) && !/\btry\b/.test(line),
+      severity: 'good',
+      title: 'Clear function signature',
+      description: 'Function name and parameters are descriptive — easy to scan and understand at a glance.',
+      lesson: 'Good naming is free documentation. A function whose name and parameters describe exactly what goes in and what comes out means future readers (including future you) don\'t need to read the implementation just to know how to call it safely.',
+      before: 'function f(x, y) { /* ... */ }',
+      after: 'function calculateDiscount(price, pct) { /* ... */ }'
+    },
+  ];
+
+  async function runReview(){
+    const key = apiKeyInput.value.trim();
+    if(!key){
+      throw new Error('Please paste your Qwen API key above first.');
+    }
+
+    const response = await fetch("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + key
+      },
+      body: JSON.stringify({
+        model: "qwen3-coder-plus",
+        messages: [
+          {
+            role: "system",
+            content: "You are a senior code reviewer AND teacher. Given a code snippet, return ONLY JSON in this exact shape, nothing else, no markdown fences: { \"findings\": [ { \"line\": 1, \"severity\": \"issue\", \"title\": \"short title\", \"description\": \"one sentence\", \"lesson\": \"a short paragraph explaining the underlying concept for a learner\", \"before\": \"the problematic snippet\", \"after\": \"the corrected snippet\" } ] }. severity must be one of issue, warn, good. Be specific and line-accurate."
+          },
+          {
+            role: "user",
+            content: codeInput.value
+          }
+        ]
+      })
+    });
+
+    const data = await response.json();
+    let raw = data.choices[0].message.content;
+    raw = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(raw);
+    return parsed.findings;
+  }
+
+  function clearMarkers(){
+    document.querySelectorAll('.gutter-marker').forEach(m => {
+      m.classList.remove('show', 'severity-issue', 'severity-warn', 'severity-good');
+      m.textContent = '';
+    });
+  }
+
+  function renderFindings(findings){
+    reviewList.innerHTML = '';
+    clearMarkers();
+
+    if(findings.length === 0){
+      reviewCount.textContent = '0';
+      reviewCount.classList.add('zero');
+      reviewList.style.display = 'none';
+      reviewEmpty.style.display = 'flex';
+      reviewEmpty.textContent = 'No issues found — looks clean.';
+      return;
+    }
+
+    reviewCount.textContent = findings.length;
+    reviewCount.classList.remove('zero');
+    reviewEmpty.style.display = 'none';
+    reviewList.style.display = 'block';
+
+    findings.forEach((f, idx) => {
+      const item = document.createElement('div');
+      item.className = `review-item severity-${f.severity}`;
+      const icon = f.severity === 'good' ? '✓' : f.severity === 'warn' ? '!' : '✕';
+
+      const hasLesson = !!f.lesson;
+      const lessonId = `lesson-${idx}`;
+
+      item.innerHTML = `
+        <div class="review-item-top">
+          <span class="review-line-tag">line ${f.line}</span>
+          <span class="review-severity-label">${f.severity}</span>
+        </div>
+        <div class="review-item-title">${f.title}</div>
+        <div class="review-item-desc">${f.description}</div>
+        ${hasLesson ? `
+          <button class="learn-toggle" data-target="${lessonId}" type="button">
+            <span class="chev">▸</span> Learn the concept
+          </button>
+          <div class="lesson-panel" id="${lessonId}">
+            <div class="lesson-eyebrow">Why this matters</div>
+            <div class="lesson-body">${f.lesson}</div>
+            <div class="lesson-eyebrow">Try it yourself</div>
+            <div class="try-it-box">
+              <div class="try-it-tabs">
+                <div class="try-it-tab before">Before</div>
+                <div class="try-it-tab after">After</div>
+              </div>
+              <div class="try-it-code before-code">${f.before}</div>
+              <div class="try-it-code after-code">${f.after}</div>
+            </div>
+          </div>
+        ` : ''}
+      `;
+
+      // Clicking the card body (but not the learn toggle) jumps to the line
+      item.addEventListener('click', (e) => {
+        if(e.target.closest('.learn-toggle')) return;
+        const marker = document.getElementById(`marker-${f.line}`);
+        if(marker) marker.scrollIntoView({ behavior:'smooth', block:'center' });
+        codeInput.focus();
+        const lines = codeInput.value.split('\n');
+        const pos = lines.slice(0, f.line - 1).join('\n').length + (f.line > 1 ? 1 : 0);
+        codeInput.setSelectionRange(pos, pos + lines[f.line - 1].length);
+      });
+
+      reviewList.appendChild(item);
+
+      if(hasLesson){
+        const toggleBtn = item.querySelector('.learn-toggle');
+        const panel = item.querySelector(`#${lessonId}`);
+        toggleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleBtn.classList.toggle('open');
+          panel.classList.toggle('open');
+        });
+      }
+
+      const marker = document.getElementById(`marker-${f.line}`);
+      if(marker){
+        marker.classList.add('show', `severity-${f.severity}`);
+        marker.textContent = icon;
+      }
+    });
+  }
+
+  reviewBtn.addEventListener('click', async () => {
+    reviewBtn.disabled = true;
+    reviewEmpty.style.display = 'none';
+    reviewList.style.display = 'none';
+    thinkingState.style.display = 'flex';
+    clearMarkers();
+
+    try {
+      const findings = await runReview();
+      thinkingState.style.display = 'none';
+      renderFindings(findings);
+    } catch (err) {
+      thinkingState.style.display = 'none';
+      reviewEmpty.style.display = 'flex';
+      reviewEmpty.textContent = 'Something went wrong calling Qwen: ' + err.message;
+    }
+    reviewBtn.disabled = false;
+  });
+</script>
+
+</body>
+</html>
